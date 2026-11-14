@@ -278,6 +278,10 @@ __net_socket struct tls_context {
 #if defined(CONFIG_NET_SOCKETS_TLS_CERT_VERIFY_CALLBACK)
 		struct zsock_tls_cert_verify_cb cert_verify;
 #endif /* CONFIG_NET_SOCKETS_TLS_CERT_VERIFY_CALLBACK */
+
+#if defined(CONFIG_NET_SOCKETS_TLS_TRUSTED_CA_CALLBACK)
+		struct zsock_tls_trusted_ca_cb trusted_ca;
+#endif /* CONFIG_NET_SOCKETS_TLS_TRUSTED_CA_CALLBACK */
 	} options;
 
 #if defined(CONFIG_NET_SOCKETS_ENABLE_DTLS)
@@ -1671,6 +1675,13 @@ static int tls_add_ca_certificate(struct tls_context *tls,
 #if defined(CONFIG_MBEDTLS_X509_CRT_PARSE_C)
 	int err;
 
+#if defined(CONFIG_NET_SOCKETS_TLS_TRUSTED_CA_CALLBACK)
+	if (tls->options.trusted_ca.cb != NULL) {
+		/* The callback provides the CA certificates */
+		return 0;
+	}
+#endif /* CONFIG_NET_SOCKETS_TLS_TRUSTED_CA_CALLBACK */
+
 	if (tls->options.cert_nocopy == ZSOCK_TLS_CERT_NOCOPY_NONE ||
 	    crt_is_pem(ca_cert->buf, ca_cert->len)) {
 		err = mbedtls_x509_crt_parse(&tls->ca_chain, ca_cert->buf,
@@ -1695,6 +1706,12 @@ static int tls_add_ca_certificate(struct tls_context *tls,
 static void tls_set_ca_chain(struct tls_context *tls)
 {
 #if defined(CONFIG_MBEDTLS_X509_CRT_PARSE_C)
+#if defined(CONFIG_NET_SOCKETS_TLS_TRUSTED_CA_CALLBACK)
+	if (tls->options.trusted_ca.cb != NULL) {
+		/* Set in tls_mbedtls_init(), a CA chain would replace it */
+		return;
+	}
+#endif /* CONFIG_NET_SOCKETS_TLS_TRUSTED_CA_CALLBACK */
 	mbedtls_ssl_conf_ca_chain(&tls->config, &tls->ca_chain, NULL);
 	mbedtls_ssl_conf_cert_profile(&tls->config,
 				      &mbedtls_x509_crt_profile_default);
@@ -2290,6 +2307,16 @@ static int tls_mbedtls_init(struct tls_context *context, bool is_server)
 					context->options.cert_verify.ctx);
 	}
 #endif /* CONFIG_NET_SOCKETS_TLS_CERT_VERIFY_CALLBACK */
+
+#if defined(CONFIG_NET_SOCKETS_TLS_TRUSTED_CA_CALLBACK)
+	if (context->options.trusted_ca.cb != NULL) {
+		mbedtls_ssl_conf_ca_cb(&context->config,
+				       context->options.trusted_ca.cb,
+				       context->options.trusted_ca.ctx);
+		mbedtls_ssl_conf_cert_profile(&context->config,
+					      &mbedtls_x509_crt_profile_default);
+	}
+#endif /* CONFIG_NET_SOCKETS_TLS_TRUSTED_CA_CALLBACK */
 
 	ret = tls_mbedtls_session_init(context->active_session, context, is_server);
 	if (ret < 0) {
@@ -3213,6 +3240,42 @@ static int tls_opt_cert_verify_callback_set(struct tls_context *context,
 	return -ENOPROTOOPT;
 }
 #endif /* CONFIG_NET_SOCKETS_TLS_CERT_VERIFY_CALLBACK */
+
+#if defined(CONFIG_NET_SOCKETS_TLS_TRUSTED_CA_CALLBACK)
+static int tls_opt_trusted_ca_callback_set(struct tls_context *context,
+					   const void *optval,
+					   net_socklen_t optlen)
+{
+	struct zsock_tls_trusted_ca_cb *trusted_ca;
+
+	if (!optval) {
+		return -EINVAL;
+	}
+
+	if (optlen != sizeof(struct zsock_tls_trusted_ca_cb)) {
+		return -EINVAL;
+	}
+
+	trusted_ca = (struct zsock_tls_trusted_ca_cb *)optval;
+	if (trusted_ca->cb == NULL) {
+		return -EINVAL;
+	}
+
+	context->options.trusted_ca = *trusted_ca;
+
+	return 0;
+}
+#else /* CONFIG_NET_SOCKETS_TLS_TRUSTED_CA_CALLBACK */
+static int tls_opt_trusted_ca_callback_set(struct tls_context *context,
+					   const void *optval,
+					   net_socklen_t optlen)
+{
+	NET_ERR("TLS_TRUSTED_CA_CALLBACK option requires "
+		"CONFIG_NET_SOCKETS_TLS_TRUSTED_CA_CALLBACK enabled");
+
+	return -ENOPROTOOPT;
+}
+#endif /* CONFIG_NET_SOCKETS_TLS_TRUSTED_CA_CALLBACK */
 
 static int protocol_check(int family, int type, int *proto)
 {
@@ -5043,6 +5106,10 @@ int ztls_setsockopt_ctx(struct tls_context *ctx, int level, int optname,
 
 	case ZSOCK_TLS_CERT_VERIFY_CALLBACK:
 		err = tls_opt_cert_verify_callback_set(ctx, optval, optlen);
+		break;
+
+	case ZSOCK_TLS_TRUSTED_CA_CALLBACK:
+		err = tls_opt_trusted_ca_callback_set(ctx, optval, optlen);
 		break;
 
 #if defined(CONFIG_NET_SOCKETS_ENABLE_DTLS)

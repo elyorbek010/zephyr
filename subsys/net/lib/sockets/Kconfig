@@ -329,6 +329,19 @@ config NET_SOCKETS_TLS_CERT_VERIFY_CALLBACK
 	  is available to use. It allows to register a certificate verification
 	  callback, which is called by the TLS backend during the TLS handshake.
 
+config NET_SOCKETS_TLS_TRUSTED_CA_CALLBACK
+	bool "TLS trusted CA callback support"
+	depends on NET_SOCKETS_SOCKOPT_TLS
+	depends on MBEDTLS_X509_CRT_PARSE_C
+	select MBEDTLS_X509_TRUSTED_CERTIFICATE_CALLBACK
+	help
+	  This option controls whether TLS_TRUSTED_CA_CALLBACK TLS socket option
+	  is available to use. It allows to register a callback that the TLS
+	  backend asks for the trusted CA certificates during the handshake,
+	  instead of parsing the CA certificates of the socket's security tags
+	  into every socket. This saves memory with a large set of CA
+	  certificates.
+
 config NET_SOCKETS_TEST_SESSION_CACHE
 	bool "Provide access to test functions for session cache management"
 	depends on NET_SOCKETS_SOCKOPT_TLS

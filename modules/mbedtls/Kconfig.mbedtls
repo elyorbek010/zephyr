@@ -300,6 +300,14 @@ config MBEDTLS_X509_CRT_PARSE_C
 	bool "X.509 certificate parsing"
 	select MBEDTLS_X509_USE_C
 
+config MBEDTLS_X509_TRUSTED_CERTIFICATE_CALLBACK
+	bool "X.509 trusted certificate callback"
+	depends on MBEDTLS_X509_CRT_PARSE_C
+	help
+	  Enable mbedtls_x509_crt_verify_with_ca_cb() and mbedtls_ssl_conf_ca_cb(),
+	  which take the trusted certificates from a callback instead of a list
+	  of parsed certificates. Useful with a large set of trusted certificates.
+
 config MBEDTLS_X509_RSASSA_PSS_SUPPORT
 	bool "X.509 RSA-PSS signature support"
 	help

@@ -273,6 +273,21 @@ extern "C" {
  *  Kconfig option is enabled.
  */
 #define ZSOCK_TLS_CERT_VERIFY_CALLBACK 20
+/** Write-only socket option to configure a trusted CA callback for the socket.
+ *  The option accepts a pointer to a @ref zsock_tls_trusted_ca_cb structure,
+ *  which contains pointers to the actual callback function and
+ *  application-defined context.
+ *
+ *  If set, the TLS backend asks the callback for the certificates that may
+ *  have signed a certificate of the peer, and verifies the peer against them.
+ *  The CA certificates of the security tags set with
+ *  @ref ZSOCK_TLS_SEC_TAG_LIST are not used and not parsed for the socket, so
+ *  a large set of CA certificates does not take memory in every socket.
+ *
+ *  The option is only available if CONFIG_NET_SOCKETS_TLS_TRUSTED_CA_CALLBACK
+ *  Kconfig option is enabled.
+ */
+#define ZSOCK_TLS_TRUSTED_CA_CALLBACK 23
 /** Write-only socket option to configure per-socket Max Fragment Length (MFL)
  *  for TLS 1.2. When set, overrides the global MFL derived from compile-time
  *  buffer sizes for this socket only. Accepts a pointer to an int holding one
@@ -322,6 +337,19 @@ extern "C" {
 #define ZSOCK_TLS_DTLS_CID_STATUS_DOWNLINK	1 /**< CID is in use by us */
 #define ZSOCK_TLS_DTLS_CID_STATUS_UPLINK	2 /**< CID is in use by peer */
 #define ZSOCK_TLS_DTLS_CID_STATUS_BIDIRECTIONAL	3 /**< CID is in use by us and peer */
+
+/** Data structure for @ref ZSOCK_TLS_TRUSTED_CA_CALLBACK socket option. */
+struct zsock_tls_trusted_ca_cb {
+	/** A pointer to the trusted CA callback function.
+	 *
+	 *  The actual callback function type is defined by mbed TLS, see
+	 *  documentation of mbedtls_x509_crt_ca_cb_t.
+	 */
+	void *cb;
+
+	/** A pointer to an opaque context passed to the callback. */
+	void *ctx;
+};
 
 /** Data structure for @ref ZSOCK_TLS_CERT_VERIFY_CALLBACK socket option. */
 struct zsock_tls_cert_verify_cb {
