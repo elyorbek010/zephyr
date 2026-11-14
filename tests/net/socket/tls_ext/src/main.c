@@ -13,6 +13,7 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
+#include <mbedtls/platform.h>
 #include <mbedtls/x509.h>
 #include <mbedtls/x509_crt.h>
 
@@ -544,6 +545,121 @@ ZTEST(net_socket_tls_api_extension, test_tls_cert_verify_cb_opt_ok)
 ZTEST(net_socket_tls_api_extension, test_tls_cert_verify_cb_opt_bad_cert)
 {
 	test_tls_cert_verify_cb_opt_common(MBEDTLS_ERR_X509_CERT_VERIFY_FAILED);
+}
+
+struct test_trusted_ca_ctx {
+	unsigned int calls;
+	bool trust_ca;
+};
+
+/* Hands the test CA to the TLS backend as the only candidate signer, in a list
+ * the backend frees, or no candidate at all.
+ */
+static int trusted_ca_cb(void *ctx, mbedtls_x509_crt const *child,
+			 mbedtls_x509_crt **candidate_cas)
+{
+	struct test_trusted_ca_ctx *test_ctx = (struct test_trusted_ca_ctx *)ctx;
+	mbedtls_x509_crt *crt;
+	int ret;
+
+	ARG_UNUSED(child);
+
+	test_ctx->calls++;
+	*candidate_cas = NULL;
+
+	if (!test_ctx->trust_ca) {
+		return 0;
+	}
+
+	crt = mbedtls_calloc(1, sizeof(*crt));
+	if (crt == NULL) {
+		return MBEDTLS_ERR_X509_ALLOC_FAILED;
+	}
+
+	mbedtls_x509_crt_init(crt);
+	ret = mbedtls_x509_crt_parse(crt, ca, sizeof(ca));
+	if (ret != 0) {
+		mbedtls_x509_crt_free(crt);
+		mbedtls_free(crt);
+		return ret;
+	}
+
+	*candidate_cas = crt;
+
+	return 0;
+}
+
+static void test_tls_trusted_ca_cb_opt_common(bool trust_ca)
+{
+	/* A tag without a CA certificate, the callback is the only source of one */
+	static const sec_tag_t client_tag_list[] = {
+		CLIENT_CERTIFICATE_TAG,
+	};
+	int server_fd, client_fd, ret;
+	k_tid_t server_thread_id;
+	struct net_sockaddr_in sa;
+	struct test_trusted_ca_ctx ctx = {
+		.calls = 0,
+		.trust_ca = trust_ca,
+	};
+	struct zsock_tls_trusted_ca_cb cb = {
+		.cb = trusted_ca_cb,
+		.ctx = &ctx,
+	};
+
+	server_fd = test_configure_server(&server_thread_id, ZSOCK_TLS_PEER_VERIFY_NONE,
+					  false, !trust_ca);
+	client_fd = test_configure_client(&sa, false, "localhost");
+
+	ret = zsock_setsockopt(client_fd, ZSOCK_SOL_TLS, ZSOCK_TLS_SEC_TAG_LIST,
+			       client_tag_list, sizeof(client_tag_list));
+	zassert_ok(ret, "failed to set TLS_SEC_TAG_LIST (%d)", errno);
+
+	ret = zsock_setsockopt(client_fd, ZSOCK_SOL_TLS, ZSOCK_TLS_TRUSTED_CA_CALLBACK,
+			       &cb, sizeof(cb));
+	zassert_ok(ret, "failed to set TLS_TRUSTED_CA_CALLBACK (%d)", errno);
+
+	ret = zsock_connect(client_fd, (struct net_sockaddr *)&sa, sizeof(sa));
+	zassert_true(ctx.calls > 0, "callback not called");
+	if (trust_ca) {
+		zassert_equal(ret, 0, "failed to connect (%d)", errno);
+	} else {
+		zassert_equal(ret, -1, "connect() should fail");
+		zassert_equal(errno, ECONNABORTED, "invalid errno");
+	}
+
+	test_shutdown(client_fd, server_fd, server_thread_id);
+}
+
+ZTEST(net_socket_tls_api_extension, test_tls_trusted_ca_cb_opt_ok)
+{
+	test_tls_trusted_ca_cb_opt_common(true);
+}
+
+ZTEST(net_socket_tls_api_extension, test_tls_trusted_ca_cb_opt_untrusted)
+{
+	test_tls_trusted_ca_cb_opt_common(false);
+}
+
+ZTEST(net_socket_tls_api_extension, test_tls_trusted_ca_cb_opt_invalid)
+{
+	struct zsock_tls_trusted_ca_cb cb = {0};
+	int client_fd, ret;
+
+	client_fd = zsock_socket(NET_PF_INET, NET_SOCK_STREAM, NET_IPPROTO_TLS_1_2);
+	zassert_true(client_fd >= 0, "failed to create client socket (%d)", errno);
+
+	ret = zsock_setsockopt(client_fd, ZSOCK_SOL_TLS, ZSOCK_TLS_TRUSTED_CA_CALLBACK,
+			       &cb, sizeof(cb));
+	zassert_equal(ret, -1, "a NULL callback should be refused");
+	zassert_equal(errno, EINVAL, "invalid errno");
+
+	ret = zsock_setsockopt(client_fd, ZSOCK_SOL_TLS, ZSOCK_TLS_TRUSTED_CA_CALLBACK,
+			       &cb, sizeof(cb) - 1);
+	zassert_equal(ret, -1, "a wrong option length should be refused");
+	zassert_equal(errno, EINVAL, "invalid errno");
+
+	zassert_ok(zsock_close(client_fd));
 }
 
 /*
